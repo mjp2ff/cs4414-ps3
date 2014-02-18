@@ -41,8 +41,6 @@ static COUNTER_STYLE : &'static str = "<doctype !html><html><head><title>Hello, 
 			 </style></head>
 			 <body>";
 
-static mut visitor_count : uint = 0;
-
 struct HTTP_Request {
 	// Use peer_name as the key to access TcpStream in hashmap. 
 
@@ -58,6 +56,7 @@ struct WebServer {
 	www_dir_path: ~Path,
 	
 	request_queue_arc: MutexArc<~[HTTP_Request]>,
+	visitor_count_arc: MutexArc<uint>,
 	stream_map_arc: MutexArc<HashMap<~str, Option<std::io::net::tcp::TcpStream>>>,
 	
 	notify_port: Port<()>,
@@ -76,6 +75,7 @@ impl WebServer {
 			www_dir_path: www_dir_path,
 						
 			request_queue_arc: MutexArc::new(~[]),
+			visitor_count_arc: MutexArc::new(0),
 			stream_map_arc: MutexArc::new(HashMap::new()),
 			
 			notify_port: notify_port,
@@ -93,6 +93,7 @@ impl WebServer {
 		let www_dir_path_str = self.www_dir_path.as_str().expect("invalid www path?").to_owned();
 		
 		let request_queue_arc = self.request_queue_arc.clone();
+		let visitor_count_arc = self.visitor_count_arc.clone();
 		let shared_notify_chan = self.shared_notify_chan.clone();
 		let stream_map_arc = self.stream_map_arc.clone();
 				
@@ -104,14 +105,19 @@ impl WebServer {
 			for stream in acceptor.incoming() {
 				let (queue_port, queue_chan) = Chan::new();
 				queue_chan.send(request_queue_arc.clone());
+
+				let (visit_count_port, visit_count_chan) = Chan::new();
+				visit_count_chan.send(visitor_count_arc.clone());
 				
 				let notify_chan = shared_notify_chan.clone();
 				let stream_map_arc = stream_map_arc.clone();
 				
 				// Spawn a task to handle the connection.
 				spawn(proc() {
-					unsafe { visitor_count += 1; } // TODO: Fix unsafe counter
 					let request_queue_arc = queue_port.recv();
+					
+					let visitor_count_arc = visit_count_port.recv();
+					visitor_count_arc.access( |count| { *count +=  1; });
 				  
 					let mut stream = stream;
 					
@@ -139,7 +145,7 @@ impl WebServer {
 							 
 						if path_str == ~"./" {
 							debug!("===== Counter Page request =====");
-							WebServer::respond_with_counter_page(stream);
+							WebServer::respond_with_counter_page(stream, visitor_count_arc.access( |count| { return *count; } ) );
 							debug!("=====Terminated connection from [{:s}].=====", peer_name);
 						} else if !path_obj.exists() || path_obj.is_dir() {
 							debug!("===== Error page request =====");
@@ -167,14 +173,14 @@ impl WebServer {
 		stream.write(msg.as_bytes());
 	}
 
-	// TODO: Safe visitor counter.
-	fn respond_with_counter_page(stream: Option<std::io::net::tcp::TcpStream>) {
+	// DONE: Safe visitor counter.
+	fn respond_with_counter_page(stream: Option<std::io::net::tcp::TcpStream>, visit_count : uint) {
 		let mut stream = stream;
 		let response: ~str = 
 			format!("{:s}{:s}<h1>Greetings, Krusty!</h1>
 					 <h2>Visitor count: {:u}</h2></body></html>\r\n", 
 					HTTP_OK, COUNTER_STYLE, 
-					unsafe { visitor_count } );
+					visit_count );
 		debug!("Responding to counter request");
 		stream.write(response.as_bytes());
 	}
