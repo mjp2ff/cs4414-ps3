@@ -25,6 +25,9 @@ use std::hashmap::HashMap;
 use extra::getopts;
 use extra::arc::MutexArc;
 
+use gash::*;
+mod gash;
+
 static SERVER_NAME : &'static str = "Zhtta Version 0.5";
 
 static IP : &'static str = "127.0.0.1";
@@ -197,7 +200,24 @@ impl WebServer {
 	// TODO: Server-side gashing.
 	fn respond_with_dynamic_page(stream: Option<std::io::net::tcp::TcpStream>, path: &Path) {
 		// for now, just serve as static file
-		WebServer::respond_with_static_file(stream, path);
+		let mut stream = stream;
+		let mut staticFile = File::open(path).expect("Invalid file!");
+		let read = staticFile.read_to_end();
+		let mut fileA = str::from_utf8(read).to_owned();
+		let mut commIndex = match fileA.find_str("<!--#exec cmd=\"") { Some(x) => x, None => -1 };
+		while(commIndex != -1) {
+			println(fileA);
+			let file = fileA;
+			let splitOnComm = [file.slice_to(commIndex), file.slice_from(commIndex+15)];
+			let endComm = match splitOnComm[1].find_str("\" -->") { Some(x) => x, None => -1 };
+			println!("{:u}", endComm);
+			let commSplit = [splitOnComm[1].slice_to(endComm), splitOnComm[1].slice_from(endComm+5)];
+			let cmdResult = gash::run_cmdline(commSplit[0]);
+			fileA = (splitOnComm[0] + cmdResult + commSplit[1]);
+			commIndex = match fileA.find_str("<!--#exec cmd=\"") { Some(x) => x, None => -1 };
+		}
+		stream.write(HTTP_OK.as_bytes());
+		stream.write(fileA.as_bytes());
 	}
 	
 	// TODO: Smarter Scheduling.
