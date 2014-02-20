@@ -39,6 +39,10 @@ static WWW_DIR : &'static str = "./www";
 static HTTP_OK : &'static str = "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n";
 static HTTP_BAD : &'static str = "HTTP/1.1 404 Not Found\r\n\r\n";
 
+static VIRGINIA_IP1_PREFIX : &'static str = "128.143.";
+static VIRGINIA_IP2_PREFIX : &'static str = "137.54.";
+static LOCALHOST_IP : &'static str = "127.0.0.1";
+
 static COUNTER_STYLE : &'static str = "<doctype !html><html><head><title>Hello, Rust!</title>
 			 <style>body { background-color: #884414; color: #FFEEAA}
 					h1 { font-size:2cm; text-align: center; color: black; text-shadow: 0 0 4mm red }
@@ -53,14 +57,14 @@ struct HTTP_Request {
 	//	See issue: https://github.com/mozilla/rust/issues/12139)
 	peer_name: ~SocketAddr,
 	path: ~Path,
-    priority: uint,
 }
 
 impl cmp::Ord for HTTP_Request {
-
-
     fn lt(&self, other: &HTTP_Request) -> bool {
-        self.priority < other.priority
+	    let myPriority = get_priority(self);
+	    let otherPriority = get_priority(other);
+
+        myPriority < otherPriority
     }
 }
 
@@ -252,20 +256,11 @@ impl WebServer {
 				local_stream_map.swap(peer_name.clone().to_str(), stream);
 			});
 		}
-		
-        let myPriority = if (peer_name.ip.to_str().starts_with("128.143.") ||
-                peer_name.ip.to_str().starts_with("137.54.") ||
-		peer_name.ip.to_str().starts_with("127.0.0.1")) {
-            1
-        } else {
-            2
-        };
-
-        println!("My priority is: {:u}\nMy IP is: {:s}", myPriority, peer_name.ip.to_str());
 
 		// Enqueue the HTTP request.
-		let req = HTTP_Request { peer_name: peer_name.clone(), path: ~path_obj.clone(), priority: myPriority };
+		let req = HTTP_Request { peer_name: peer_name.clone(), path: ~path_obj.clone() };
 		let (req_port, req_chan) = Chan::new();
+        println!("My priority is {:u} and my IP is {:s}", get_priority(&req), req.peer_name.ip.to_str())
 		req_chan.send(req);
 
 		debug!("Waiting for queue mutex lock.");
@@ -334,6 +329,13 @@ impl WebServer {
 			None => (~default.unwrap())
 		}
 	}
+}
+
+fn get_priority(req : &HTTP_Request) -> uint {
+	if (req.peer_name.ip.to_str().starts_with(VIRGINIA_IP1_PREFIX) ||
+		req.peer_name.ip.to_str().starts_with(VIRGINIA_IP2_PREFIX) ||
+		req.peer_name.ip.to_str().starts_with(LOCALHOST_IP)) 
+	{ 1 } else { 2 }
 }
 
 fn get_args() -> (~str, uint, ~str) {
