@@ -21,6 +21,8 @@ use std::io::net::ip::{SocketAddr};
 use std::{os, str, libc, from_str};
 use std::path::Path;
 use std::hashmap::HashMap;
+use extra::priority_queue::PriorityQueue;
+use std::cmp;
 
 use extra::getopts;
 use extra::arc::MutexArc;
@@ -49,8 +51,17 @@ struct HTTP_Request {
 
 	// (Due to a bug in extra::arc in Rust 0.9, it is very inconvenient to use TcpStream without the "Freeze" bound.
 	//	See issue: https://github.com/mozilla/rust/issues/12139)
-	peer_name: ~str,
+	peer_name: ~SocketAddr,
 	path: ~Path,
+    priority: uint,
+}
+
+impl cmp::Ord for HTTP_Request {
+
+
+    fn lt(&self, other: &HTTP_Request) -> bool {
+        self.priority < other.priority
+    }
 }
 
 struct WebServer {
@@ -58,8 +69,9 @@ struct WebServer {
 	port: uint,
 	www_dir_path: ~Path,
 	
-	request_queue_arc: MutexArc<~[HTTP_Request]>,
+	request_queue_arc: MutexArc<PriorityQueue<HTTP_Request>>,
 	visitor_count_arc: MutexArc<uint>,
+    // Hashes on string instead of SocketAddr (just cuz for hashing)
 	stream_map_arc: MutexArc<HashMap<~str, Option<std::io::net::tcp::TcpStream>>>,
 	
 	notify_port: Port<()>,
@@ -77,7 +89,7 @@ impl WebServer {
 			port: port,
 			www_dir_path: www_dir_path,
 						
-			request_queue_arc: MutexArc::new(~[]),
+			request_queue_arc: MutexArc::new(PriorityQueue::new()),
 			visitor_count_arc: MutexArc::new(0),
 			stream_map_arc: MutexArc::new(HashMap::new()),
 			
@@ -149,15 +161,15 @@ impl WebServer {
 						if path_str == ~"./" {
 							debug!("===== Counter Page request =====");
 							WebServer::respond_with_counter_page(stream, visitor_count_arc.access( |count| { return *count; } ) );
-							debug!("=====Terminated connection from [{:s}].=====", peer_name);
+							debug!("=====Terminated connection from [{:s}].=====", peer_name.to_str());
 						} else if !path_obj.exists() || path_obj.is_dir() {
 							debug!("===== Error page request =====");
 							WebServer::respond_with_error_page(stream, path_obj);
-							debug!("=====Terminated connection from [{:s}].=====", peer_name);
+							debug!("=====Terminated connection from [{:s}].=====", peer_name.to_str());
 						} else if ext_str == "shtml" { // Dynamic web pages.
 							debug!("===== Dynamic Page request =====");
 							WebServer::respond_with_dynamic_page(stream, path_obj);
-							debug!("=====Terminated connection from [{:s}].=====", peer_name);
+							debug!("=====Terminated connection from [{:s}].=====", peer_name.to_str());
 						} else { 
 							debug!("===== Static Page request =====");
 							WebServer::enqueue_static_file_request(stream, path_obj, stream_map_arc, request_queue_arc, notify_chan);
@@ -227,7 +239,7 @@ impl WebServer {
 	}
 	
 	// TODO: Smarter Scheduling.
-	fn enqueue_static_file_request(stream: Option<std::io::net::tcp::TcpStream>, path_obj: &Path, stream_map_arc: MutexArc<HashMap<~str, Option<std::io::net::tcp::TcpStream>>>, req_queue_arc: MutexArc<~[HTTP_Request]>, notify_chan: SharedChan<()>) {
+	fn enqueue_static_file_request(stream: Option<std::io::net::tcp::TcpStream>, path_obj: &Path, stream_map_arc: MutexArc<HashMap<~str, Option<std::io::net::tcp::TcpStream>>>, req_queue_arc: MutexArc<PriorityQueue<HTTP_Request>>, notify_chan: SharedChan<()>) {
 		// Save stream in hashmap for later response.
 		let mut stream = stream;
 		let peer_name = WebServer::get_peer_name(&mut stream);
@@ -237,12 +249,21 @@ impl WebServer {
 			// Use an unsafe method, because TcpStream in Rust 0.9 doesn't have "Freeze" bound.
 			stream_map_arc.unsafe_access(|local_stream_map| {
 				let stream = stream_port.recv();
-				local_stream_map.swap(peer_name.clone(), stream);
+				local_stream_map.swap(peer_name.clone().to_str(), stream);
 			});
 		}
 		
+        let myPriority = if (peer_name.ip.to_str().starts_with("128.143.") ||
+                peer_name.ip.to_str().starts_with("137.54.")) {
+            1
+        } else {
+            2
+        };
+
+        println!("My priority is: {:u}", myPriority);
+
 		// Enqueue the HTTP request.
-		let req = HTTP_Request { peer_name: peer_name.clone(), path: ~path_obj.clone() };
+		let req = HTTP_Request { peer_name: peer_name.clone(), path: ~path_obj.clone(), priority: myPriority };
 		let (req_port, req_chan) = Chan::new();
 		req_chan.send(req);
 
@@ -271,7 +292,7 @@ impl WebServer {
 			self.notify_port.recv();	// waiting for new request enqueued.
 			
 			req_queue_get.access( |req_queue| {
-				match req_queue.shift_opt() { // FIFO queue.
+				match req_queue.maybe_pop() { // FIFO queue.
 					None => { /* do nothing */ }
 					Some(req) => {
 						request_chan.send(req);
@@ -287,7 +308,7 @@ impl WebServer {
 			let (stream_port, stream_chan) = Chan::new();
 			unsafe {
 				stream_map_get.unsafe_access(|local_stream_map| {
-					let stream = local_stream_map.pop(&request.peer_name).expect("no option tcpstream");
+					let stream = local_stream_map.pop(&request.peer_name.to_str()).expect("no option tcpstream");
 					stream_chan.send(stream);
 				});
 			}
@@ -296,19 +317,20 @@ impl WebServer {
 			let stream = stream_port.recv();
 			WebServer::respond_with_static_file(stream, request.path);
 			// Close stream automatically.
-			debug!("=====Terminated connection from [{:s}].=====", request.peer_name);
+			debug!("=====Terminated connection from [{:s}].=====", request.peer_name.to_str());
 		}
 	}
 	
-	fn get_peer_name(stream: &mut Option<std::io::net::tcp::TcpStream>) -> ~str {
+	fn get_peer_name(stream: &mut Option<std::io::net::tcp::TcpStream>) -> ~SocketAddr {
+        let default : Option<SocketAddr> = FromStr::from_str(IP + ":" + PORT.to_str());
 		match *stream {
 			Some(ref mut s) => {
 						 match s.peer_name() {
-							Some(pn) => {pn.to_str()},
-							None => (~"")
+							Some(pn) => {~pn},
+							None => (~default.unwrap())
 						 }
 					   },
-			None => (~"")
+			None => (~default.unwrap())
 		}
 	}
 }
