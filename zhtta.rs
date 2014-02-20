@@ -59,10 +59,19 @@ struct HTTP_Request {
 	path: ~Path,
 }
 
+impl HTTP_Request {
+	fn get_priority(&self) -> uint {
+		if (self.peer_name.ip.to_str().starts_with(VIRGINIA_IP1_PREFIX) ||
+			self.peer_name.ip.to_str().starts_with(VIRGINIA_IP2_PREFIX) ||
+			self.peer_name.ip.to_str().starts_with(LOCALHOST_IP)) 
+		{ 1 } else { 2 }
+	}
+}
+
 impl cmp::Ord for HTTP_Request {
     fn lt(&self, other: &HTTP_Request) -> bool {
-	    let myPriority = get_priority(self);
-	    let otherPriority = get_priority(other);
+	    let myPriority = self.get_priority();
+	    let otherPriority = other.get_priority();
 
         myPriority < otherPriority
     }
@@ -260,7 +269,7 @@ impl WebServer {
 		// Enqueue the HTTP request.
 		let req = HTTP_Request { peer_name: peer_name.clone(), path: ~path_obj.clone() };
 		let (req_port, req_chan) = Chan::new();
-        println!("My priority is {:u} and my IP is {:s}", get_priority(&req), req.peer_name.ip.to_str())
+        println!("My priority is {:u} and my IP is {:s}", req.get_priority(), req.peer_name.ip.to_str())
 		req_chan.send(req);
 
 		debug!("Waiting for queue mutex lock.");
@@ -329,13 +338,6 @@ impl WebServer {
 			None => (~default.unwrap())
 		}
 	}
-}
-
-fn get_priority(req : &HTTP_Request) -> uint {
-	if (req.peer_name.ip.to_str().starts_with(VIRGINIA_IP1_PREFIX) ||
-		req.peer_name.ip.to_str().starts_with(VIRGINIA_IP2_PREFIX) ||
-		req.peer_name.ip.to_str().starts_with(LOCALHOST_IP)) 
-	{ 1 } else { 2 }
 }
 
 fn get_args() -> (~str, uint, ~str) {
