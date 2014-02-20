@@ -254,13 +254,14 @@ impl WebServer {
 		}
 		
         let myPriority = if (peer_name.ip.to_str().starts_with("128.143.") ||
-                peer_name.ip.to_str().starts_with("137.54.")) {
+                peer_name.ip.to_str().starts_with("137.54.") ||
+		peer_name.ip.to_str().starts_with("127.0.0.1")) {
             1
         } else {
             2
         };
 
-        println!("My priority is: {:u}", myPriority);
+        println!("My priority is: {:u}\nMy IP is: {:s}", myPriority, peer_name.ip.to_str());
 
 		// Enqueue the HTTP request.
 		let req = HTTP_Request { peer_name: peer_name.clone(), path: ~path_obj.clone(), priority: myPriority };
