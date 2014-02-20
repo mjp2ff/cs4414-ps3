@@ -287,15 +287,32 @@ impl WebServer {
 	
 	// TODO: Smarter Scheduling.
 	fn dequeue_static_file_request(&mut self) {
-		let req_queue_get = self.request_queue_arc.clone();
-		let stream_map_get = self.stream_map_arc.clone();
-		
-		// Port<> cannot be sent to another task. So we have to make this task as the main task that can access self.notify_port.
-		
+        // Port<> cannot be sent to another task. So we have to make this task as the main task that can access self.notify_port.
+        let mut handler_comms: ~[Chan<()>] = ~[];
+        let (handler_finished_port, handler_finished_chan) = SharedChan::new();
+
+        for i in range(0, 7) {
+            let (handler_port, handler_chan) = Chan::new();
+    		let req_queue_get = self.request_queue_arc.clone();
+    		let stream_map_get = self.stream_map_arc.clone();
+            let handler_finished_chan_clone = handler_finished_chan.clone();
+            handler_comms.push(handler_chan);
+            spawn(proc() { WebServer::static_file_request_handler(i, req_queue_get, stream_map_get, handler_port, handler_finished_chan_clone); });
+        }
+
+        loop {
+            self.notify_port.recv();    // waiting for new request enqueued.
+            let handler_index = handler_finished_port.recv();
+            handler_comms[handler_index].send(());
+        }
+    }
+
+    fn static_file_request_handler(i: int, req_queue_get: MutexArc<PriorityQueue<HTTP_Request>>, stream_map_get: MutexArc<HashMap<~str, Option<std::io::net::tcp::TcpStream>>>, handler_port: Port<()>, handler_finished_chan: SharedChan<int>) {
 		let (request_port, request_chan) = Chan::new();
-		loop {
-			self.notify_port.recv();	// waiting for new request enqueued.
-			
+        loop {
+            handler_finished_chan.send(i);
+            println!("Port {:d} is ready!", i);
+			handler_port.recv();
 			req_queue_get.access( |req_queue| {
 				match req_queue.maybe_pop() { // FIFO queue.
 					None => { /* do nothing */ }
@@ -324,7 +341,7 @@ impl WebServer {
 			// Close stream automatically.
 			debug!("=====Terminated connection from [{:s}].=====", request.peer_name.to_str());
 		}
-	}
+    }
 	
 	fn get_peer_name(stream: &mut Option<std::io::net::tcp::TcpStream>) -> ~SocketAddr {
         let default : Option<SocketAddr> = FromStr::from_str(IP + ":" + PORT.to_str());
