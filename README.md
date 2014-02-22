@@ -5,6 +5,8 @@ Matt Pearson-Beck, Jeff Principe, Arjun Shankar
 
 Code for benchmarking: ```time ./benchmark.sh &>/dev/null```
 
+Run this to fix test files: ```tr "\n" "\0" < zhtta-test.txt > zhtta-test-NUL.txt```
+
 Includes:
 
 - zhtta.rs: code for Zhtta web server.
