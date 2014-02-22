@@ -292,8 +292,16 @@ impl WebServer {
         let (handler_finished_port, handler_finished_chan) = SharedChan::new();
 
         // Benchmarking tests
-        // --- 8 tasks: 1.579s, 1.588s, 1.602s, 1.622s, 1.574s
-        for i in range(0, 7) {
+		// --- Before : 1.851s, 1.820s, 1.862s, 1.989s, 1.857s => avg: 1.876
+		// --- 1 task : 1.832s, 1.868s, 1.861s, 1.864s, 1.852s => avg: 1.855
+		// --- 2 tasks: 1.602s, 1.585s, 1.611s, 1.605s, 1.583s => avg: 1.597
+		// --- 3 tasks: 1.565s, 1.583s, 1.589s, 1.583s, 1.573s => avg: 1.579
+        // --- 4 tasks: 1.578s, 1.582s, 1.596s, 1.582s, 1.591s => avg: 1.586
+        // --- 7 tasks: 1.579s, 1.588s, 1.602s, 1.622s, 1.574s => avg: 1.593
+        // --- 8 tasks: 1.614s, 1.593s, 1.598s, 1.588s, 1.593s => avg: 1.597
+        // --- 16 task: 1.565s, 1.592s, 1.586s, 1.580s, 1.591s => avg: 1.583
+        // --- 32 task: 1.586s, 1.613s, 1.631s, 1.584s, 1.600s => avg: 1.603
+        for i in range(0, 4) {
             let (handler_port, handler_chan) = Chan::new();
     		let req_queue_get = self.request_queue_arc.clone();
     		let stream_map_get = self.stream_map_arc.clone();
