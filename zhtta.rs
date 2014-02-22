@@ -269,7 +269,7 @@ impl WebServer {
 		// Enqueue the HTTP request.
 		let req = HTTP_Request { peer_name: peer_name.clone(), path: ~path_obj.clone() };
 		let (req_port, req_chan) = Chan::new();
-        println!("My priority is {:u} and my IP is {:s}", req.get_priority(), req.peer_name.ip.to_str())
+        //println!("My priority is {:u} and my IP is {:s}", req.get_priority(), req.peer_name.ip.to_str())
 		req_chan.send(req);
 
 		debug!("Waiting for queue mutex lock.");
@@ -291,6 +291,8 @@ impl WebServer {
         let mut handler_comms: ~[Chan<()>] = ~[];
         let (handler_finished_port, handler_finished_chan) = SharedChan::new();
 
+        // Benchmarking tests
+        // --- 8 tasks: 1.579s, 1.588s, 1.602s, 1.622s, 1.574s
         for i in range(0, 7) {
             let (handler_port, handler_chan) = Chan::new();
     		let req_queue_get = self.request_queue_arc.clone();
@@ -311,7 +313,7 @@ impl WebServer {
 		let (request_port, request_chan) = Chan::new();
         loop {
             handler_finished_chan.send(i);
-            println!("Port {:d} is ready!", i);
+            //println!("Port {:d} is ready!", i);
 			handler_port.recv();
 			req_queue_get.access( |req_queue| {
 				match req_queue.maybe_pop() { // FIFO queue.
