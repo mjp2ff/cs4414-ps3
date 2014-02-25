@@ -70,8 +70,8 @@ impl HTTP_Request {
 		let fsize = self.path.stat().size;
 		if (self.peer_name.ip.to_str().starts_with(VIRGINIA_IP1_PREFIX) ||
 			self.peer_name.ip.to_str().starts_with(VIRGINIA_IP2_PREFIX) ||
-			self.peer_name.ip.to_str().starts_with(LOCALHOST_IP)) 
-		{ 10000000000 - fsize} else { -1 * fsize }
+			self.peer_name.ip.to_str().starts_with(LOCALHOST_IP))
+		{ 20000000000 - fsize} else { 20000000000 - fsize }
 	}
 }
 
@@ -356,7 +356,7 @@ impl WebServer {
 				match req_queue.maybe_pop() { // FIFO queue.
 					None => { /* do nothing */ }
 					Some(req) => {
-						// println!("My file size is {:u} and my IP is {:s}", req.path.stat().size, req.peer_name.ip.to_str())
+						// println!("My file size is {:u}, my IP is {:s}, my priority is {:u}", req.path.stat().size, req.peer_name.ip.to_str(), req.get_priority())
 						// ^ Was using that to test that SPTF worked. It did!
 						/* NOTE FOR US TO TALK ABOUT:
 							It does the first n first no matter the size, where n is the for loop bound above (we set to 4).
