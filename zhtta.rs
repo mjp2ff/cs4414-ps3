@@ -68,10 +68,15 @@ impl HTTP_Request {
 	*/
 	fn get_priority(&self) -> u64 {
 		let fsize = self.path.stat().size;
+		let fsizeScaled = std::num::min(20000000000, std::num::max(0, 20000000000 / fsize));
+		// Use fsizeScaled for priority, guaranteed 0 < fsizeScaled < 20B.
+		// CVille/local IPs are priority 20B < x < 40B, others are 0 < x < 20B.
+		// This way all 'preferred' requests are handled first, and within
+		// that category all smaller files are handled first.
 		if (self.peer_name.ip.to_str().starts_with(VIRGINIA_IP1_PREFIX) ||
 			self.peer_name.ip.to_str().starts_with(VIRGINIA_IP2_PREFIX) ||
 			self.peer_name.ip.to_str().starts_with(LOCALHOST_IP))
-		{ 20000000000 - fsize} else { 20000000000 - fsize }
+		{ fsizeScaled + 20000000000 } else { fsizeScaled }
 	}
 }
 
@@ -230,14 +235,14 @@ impl WebServer {
 		spawn(proc() {
 			let mut stream = stream;
 			stream.write(HTTP_OK.as_bytes());
-			for i in range (0, num_chunks) {
+			for _ in range (0, num_chunks) {
 				let chunk : ~[u8] = write_port.recv();
 				stream.write(chunk);
 			}
 			stream.write(write_port.recv());
 		});
 		
-		for i in range (0, num_chunks) {
+		for _ in range (0, num_chunks) {
 			write_chan.send(file_reader.read_bytes(chunk_size));
 		}
 		write_chan.send(file_reader.read_to_end());
@@ -357,7 +362,7 @@ impl WebServer {
 					None => { /* do nothing */ }
 					Some(req) => {
 						// println!("My file size is {:u}, my IP is {:s}, my priority is {:u}", req.path.stat().size, req.peer_name.ip.to_str(), req.get_priority())
-						// ^ Was using that to test that SPTF worked. It did!
+						// ^ Use this to test lots of stuff (including SPTF).
 						/* NOTE FOR US TO TALK ABOUT:
 							It does the first n first no matter the size, where n is the for loop bound above (we set to 4).
 							Then it's pretty good about doing smaller ones first, but it's hard to tell on the zhtta-test-NUL.txt
