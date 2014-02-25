@@ -76,11 +76,11 @@ impl HTTP_Request {
 }
 
 impl cmp::Ord for HTTP_Request {
-    fn lt(&self, other: &HTTP_Request) -> bool {
-	    let myPriority = self.get_priority();
-	    let otherPriority = other.get_priority();
-        myPriority < otherPriority
-    }
+	fn lt(&self, other: &HTTP_Request) -> bool {
+		let myPriority = self.get_priority();
+		let otherPriority = other.get_priority();
+		myPriority < otherPriority
+	}
 }
 
 struct WebServer {
@@ -90,7 +90,7 @@ struct WebServer {
 	
 	request_queue_arc: MutexArc<PriorityQueue<HTTP_Request>>,
 	visitor_count_arc: MutexArc<uint>,
-    // Hashes on string instead of SocketAddr (just cuz for hashing)
+	// Hashes on string instead of SocketAddr (just cuz for hashing)
 	stream_map_arc: MutexArc<HashMap<~str, Option<std::io::net::tcp::TcpStream>>>,
 	
 	notify_port: Port<()>,
@@ -314,51 +314,51 @@ impl WebServer {
 
 	// DONE: Smarter Scheduling.
 	fn dequeue_static_file_request(&mut self) {
-        // Port<> cannot be sent to another task. So we have to make this task as the main task that can access self.notify_port.
-        let mut handler_comms: ~[Chan<()>] = ~[];
-        let (handler_finished_port, handler_finished_chan) = SharedChan::new();
+		// Port<> cannot be sent to another task. So we have to make this task as the main task that can access self.notify_port.
+		let mut handler_comms: ~[Chan<()>] = ~[];
+		let (handler_finished_port, handler_finished_chan) = SharedChan::new();
 
-        // Benchmarking tests
+		// Benchmarking tests
 		// --- Before : 1.851s, 1.820s, 1.862s, 1.989s, 1.857s => avg: 1.876
 		// --- 1 task : 1.832s, 1.868s, 1.861s, 1.864s, 1.852s => avg: 1.855
 		// --- 2 tasks: 1.602s, 1.585s, 1.611s, 1.605s, 1.583s => avg: 1.597
 		// --- 3 tasks: 1.565s, 1.583s, 1.589s, 1.583s, 1.573s => avg: 1.579
-        // --- 4 tasks: 1.578s, 1.582s, 1.596s, 1.582s, 1.591s => avg: 1.586
-        // --- 7 tasks: 1.579s, 1.588s, 1.602s, 1.622s, 1.574s => avg: 1.593
-        // --- 8 tasks: 1.614s, 1.593s, 1.598s, 1.588s, 1.593s => avg: 1.597
-        // --- 16 task: 1.565s, 1.592s, 1.586s, 1.580s, 1.591s => avg: 1.583
-        // --- 32 task: 1.586s, 1.613s, 1.631s, 1.584s, 1.600s => avg: 1.603
-        // All tests done immediately after Step 4 (multiple response tasks),
-        // not accurate times at/after Step 5 (SPTF) and beyond.
-        for i in range(0, 4) {
-            let (handler_port, handler_chan) = Chan::new();
-    		let req_queue_get = self.request_queue_arc.clone();
-    		let stream_map_get = self.stream_map_arc.clone();
-            let handler_finished_chan_clone = handler_finished_chan.clone();
-            handler_comms.push(handler_chan);
-            spawn(proc() { WebServer::static_file_request_handler(i, req_queue_get, stream_map_get, handler_port, handler_finished_chan_clone); });
-        }
+		// --- 4 tasks: 1.578s, 1.582s, 1.596s, 1.582s, 1.591s => avg: 1.586
+		// --- 7 tasks: 1.579s, 1.588s, 1.602s, 1.622s, 1.574s => avg: 1.593
+		// --- 8 tasks: 1.614s, 1.593s, 1.598s, 1.588s, 1.593s => avg: 1.597
+		// --- 16 task: 1.565s, 1.592s, 1.586s, 1.580s, 1.591s => avg: 1.583
+		// --- 32 task: 1.586s, 1.613s, 1.631s, 1.584s, 1.600s => avg: 1.603
+		// All tests done immediately after Step 4 (multiple response tasks),
+		// not accurate times at/after Step 5 (SPTF) and beyond.
+		for i in range(0, 4) {
+			let (handler_port, handler_chan) = Chan::new();
+			let req_queue_get = self.request_queue_arc.clone();
+			let stream_map_get = self.stream_map_arc.clone();
+			let handler_finished_chan_clone = handler_finished_chan.clone();
+			handler_comms.push(handler_chan);
+			spawn(proc() { WebServer::static_file_request_handler(i, req_queue_get, stream_map_get, handler_port, handler_finished_chan_clone); });
+		}
 
-        loop {
-            self.notify_port.recv();    // waiting for new request enqueued.
-            let handler_index = handler_finished_port.recv();
-            handler_comms[handler_index].send(());
-        }
-    }
+		loop {
+			self.notify_port.recv();	// waiting for new request enqueued.
+			let handler_index = handler_finished_port.recv();
+			handler_comms[handler_index].send(());
+		}
+	}
 
-    fn static_file_request_handler(i: int, req_queue_get: MutexArc<PriorityQueue<HTTP_Request>>, stream_map_get: MutexArc<HashMap<~str, Option<std::io::net::tcp::TcpStream>>>, handler_port: Port<()>, handler_finished_chan: SharedChan<int>) {
+	fn static_file_request_handler(i: int, req_queue_get: MutexArc<PriorityQueue<HTTP_Request>>, stream_map_get: MutexArc<HashMap<~str, Option<std::io::net::tcp::TcpStream>>>, handler_port: Port<()>, handler_finished_chan: SharedChan<int>) {
 		let (request_port, request_chan) = Chan::new();
-        loop {
-            handler_finished_chan.send(i);
-            //println!("Port {:d} is ready!", i);
+		loop {
+			handler_finished_chan.send(i);
+			//println!("Port {:d} is ready!", i);
 			handler_port.recv();
 			req_queue_get.access( |req_queue| {
 				match req_queue.maybe_pop() { // FIFO queue.
 					None => { /* do nothing */ }
 					Some(req) => {
-				        // println!("My file size is {:u} and my IP is {:s}", req.path.stat().size, req.peer_name.ip.to_str())
-				        // ^ Was using that to test that SPTF worked. It did!
-				        /* NOTE FOR US TO TALK ABOUT:
+						// println!("My file size is {:u} and my IP is {:s}", req.path.stat().size, req.peer_name.ip.to_str())
+						// ^ Was using that to test that SPTF worked. It did!
+						/* NOTE FOR US TO TALK ABOUT:
 							It does the first n first no matter the size, where n is the for loop bound above (we set to 4).
 							Then it's pretty good about doing smaller ones first, but it's hard to tell on the zhtta-test-NUL.txt
 							file... It is apparent on zhtta-test2-NUL.txt
@@ -388,10 +388,10 @@ impl WebServer {
 			// Close stream automatically.
 			debug!("=====Terminated connection from [{:s}].=====", request.peer_name.to_str());
 		}
-    }
+	}
 	
 	fn get_peer_name(stream: &mut Option<std::io::net::tcp::TcpStream>) -> ~SocketAddr {
-        let default : Option<SocketAddr> = FromStr::from_str(IP + ":" + PORT.to_str());
+		let default : Option<SocketAddr> = FromStr::from_str(IP + ":" + PORT.to_str());
 		match *stream {
 			Some(ref mut s) => {
 						 match s.peer_name() {
@@ -409,7 +409,7 @@ fn get_args() -> (~str, uint, ~str) {
 		println!("Usage: {:s} [options]", program);
 		println!("--ip	   \tIP address, \"{:s}\" by default.", IP);
 		println!("--port   \tport number, \"{:u}\" by default.", PORT);
-		println!("--www    \tworking directory, \"{:s}\" by default", WWW_DIR);
+		println!("--www	\tworking directory, \"{:s}\" by default", WWW_DIR);
 		println("-h --help \tUsage");
 	}
 	
