@@ -3,12 +3,12 @@
 ./zhtta &
 time1=$(date +"%s");
 httperf --server localhost --port 4414 --rate 60 --num-conns 60 --wlog=y,./zhtta-test-NUL.txt
-httperf --server localhost --port 4414 --rate 60 --num-conns 60 --wlog=y,./zhtta-test-NUL.txt
-httperf --server localhost --port 4414 --rate 60 --num-conns 60 --wlog=y,./zhtta-test-NUL.txt
-httperf --server localhost --port 4414 --rate 60 --num-conns 60 --wlog=y,./zhtta-test-NUL.txt
-httperf --server localhost --port 4414 --rate 60 --num-conns 60 --wlog=y,./zhtta-test-NUL.txt
+printf "\nSupressing output of 4 other bencharking tests...\n"
+httperf --server localhost --port 4414 --rate 60 --num-conns 60 --wlog=y,./zhtta-test-NUL.txt &> /dev/null
+httperf --server localhost --port 4414 --rate 60 --num-conns 60 --wlog=y,./zhtta-test-NUL.txt &> /dev/null
+httperf --server localhost --port 4414 --rate 60 --num-conns 60 --wlog=y,./zhtta-test-NUL.txt &> /dev/null
+httperf --server localhost --port 4414 --rate 60 --num-conns 60 --wlog=y,./zhtta-test-NUL.txt &> /dev/null
 time2=$(date +"%s");
 diff=$(($time2 - $time1));
 pkill zhtta
-echo $'\n'
-echo "$(($diff/60)) minutes and $(($diff % 60)) seconds elapsed."
+printf "\n5 tests completed in %d:%0.2d\n" $(($diff/60)) $(($diff % 60))
