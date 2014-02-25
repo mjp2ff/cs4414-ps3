@@ -1,14 +1,19 @@
 #!/bin/bash
-# Run benchmarking 5 times
+# Run benchmarking 10 times
 ./zhtta &
-time1=$(date +"%s");
+T=$(date +%s%N);
 httperf --server localhost --port 4414 --rate 60 --num-conns 60 --wlog=y,./zhtta-test-NUL.txt
-printf "\nSupressing output of 4 other bencharking tests...\n"
+printf "\nSupressing output of 9 other bencharking tests...\n"
 httperf --server localhost --port 4414 --rate 60 --num-conns 60 --wlog=y,./zhtta-test-NUL.txt &> /dev/null
 httperf --server localhost --port 4414 --rate 60 --num-conns 60 --wlog=y,./zhtta-test-NUL.txt &> /dev/null
 httperf --server localhost --port 4414 --rate 60 --num-conns 60 --wlog=y,./zhtta-test-NUL.txt &> /dev/null
 httperf --server localhost --port 4414 --rate 60 --num-conns 60 --wlog=y,./zhtta-test-NUL.txt &> /dev/null
-time2=$(date +"%s");
-diff=$(($time2 - $time1));
+httperf --server localhost --port 4414 --rate 60 --num-conns 60 --wlog=y,./zhtta-test-NUL.txt &> /dev/null
+httperf --server localhost --port 4414 --rate 60 --num-conns 60 --wlog=y,./zhtta-test-NUL.txt &> /dev/null
+httperf --server localhost --port 4414 --rate 60 --num-conns 60 --wlog=y,./zhtta-test-NUL.txt &> /dev/null
+httperf --server localhost --port 4414 --rate 60 --num-conns 60 --wlog=y,./zhtta-test-NUL.txt &> /dev/null
+httperf --server localhost --port 4414 --rate 60 --num-conns 60 --wlog=y,./zhtta-test-NUL.txt &> /dev/null
+T=$(($(date +%s%N)-T));
 pkill zhtta
-printf "\n5 tests completed in %d:%0.2d\n" $(($diff/60)) $(($diff % 60))
+printf "\n10 tests completed in %d.%d seconds.\n" "$((T/1000000000))" "$((T/1000000%1000))"
+#printf "\n10 tests completed in %d:%0.2d\n" $(($diff/60)) $(($diff % 60))

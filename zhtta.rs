@@ -60,7 +60,14 @@ struct HTTP_Request {
 }
 
 impl HTTP_Request {
-	fn get_priority(&self) -> uint {
+	/* Calculates priority for a request. Does SFTP and location prioritization
+		by settings the priority of a request equal to its file size, and adding 
+		10,000,000,000 to the priority of any non-Charlottesville request.
+		This guarantees that any Charlottesville requests still have priority,
+		unless someone tries to get a file > 10GB from the server...
+	*/
+	fn get_priority(&self) -> u64 {
+		let fsize = self.path.stat().size;
 		if (self.peer_name.ip.to_str().starts_with(VIRGINIA_IP1_PREFIX) ||
 			self.peer_name.ip.to_str().starts_with(VIRGINIA_IP2_PREFIX) ||
 			self.peer_name.ip.to_str().starts_with(LOCALHOST_IP)) 
@@ -72,7 +79,6 @@ impl cmp::Ord for HTTP_Request {
     fn lt(&self, other: &HTTP_Request) -> bool {
 	    let myPriority = self.get_priority();
 	    let otherPriority = other.get_priority();
-
         myPriority < otherPriority
     }
 }
@@ -285,7 +291,7 @@ impl WebServer {
 	
 	}
 
-	// TODO: Smarter Scheduling.
+	// DONE: Smarter Scheduling.
 	fn dequeue_static_file_request(&mut self) {
         // Port<> cannot be sent to another task. So we have to make this task as the main task that can access self.notify_port.
         let mut handler_comms: ~[Chan<()>] = ~[];
@@ -301,6 +307,8 @@ impl WebServer {
         // --- 8 tasks: 1.614s, 1.593s, 1.598s, 1.588s, 1.593s => avg: 1.597
         // --- 16 task: 1.565s, 1.592s, 1.586s, 1.580s, 1.591s => avg: 1.583
         // --- 32 task: 1.586s, 1.613s, 1.631s, 1.584s, 1.600s => avg: 1.603
+        // All tests done immediately after Step 4 (multiple response tasks),
+        // not accurate times at/after Step 5 (SRPT) and beyond.
         for i in range(0, 4) {
             let (handler_port, handler_chan) = Chan::new();
     		let req_queue_get = self.request_queue_arc.clone();
@@ -345,7 +353,8 @@ impl WebServer {
 				});
 			}
 			
-			// TODO: Spawning more tasks to respond the dequeued requests concurrently. You may need a semophore to control the concurrency.
+			// DONE: Spawning more tasks to respond the dequeued requests concurrently. You may need a semophore to control the concurrency.
+			// ^ We did the above in dequeue_static_file_request instead of static_file_request_handler, still should behave the same though.
 			let stream = stream_port.recv();
 			WebServer::respond_with_static_file(stream, request.path);
 			// Close stream automatically.
