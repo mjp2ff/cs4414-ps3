@@ -229,7 +229,7 @@ impl WebServer {
 	fn respond_with_static_file(stream: Option<std::io::net::tcp::TcpStream>, path: &Path) {
 		let mut file_reader = File::open(path).expect("Invalid file!");
 		let (write_port, write_chan) = Chan::new();
-		let chunk_size : uint = 1000000;
+		let chunk_size : uint = 1048576; // 2^20
 		let num_chunks = path.stat().size / (chunk_size as u64);
 
 		spawn(proc() {
