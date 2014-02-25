@@ -16,4 +16,3 @@ httperf --server localhost --port 4414 --rate 60 --num-conns 60 --wlog=y,./zhtta
 T=$(($(date +%s%N)-T));
 pkill zhtta
 printf "\n10 tests completed in %d.%d seconds.\n" "$((T/1000000000))" "$((T/1000000%1000))"
-#printf "\n10 tests completed in %d:%0.2d\n" $(($diff/60)) $(($diff % 60))

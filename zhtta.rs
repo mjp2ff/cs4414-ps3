@@ -60,7 +60,7 @@ struct HTTP_Request {
 }
 
 impl HTTP_Request {
-	/* Calculates priority for a request. Does SFTP and location prioritization
+	/* Calculates priority for a request. Implements SPTF and location prioritization
 		by settings the priority of a request equal to its file size, and adding 
 		10,000,000,000 to the priority of any non-Charlottesville request.
 		This guarantees that any Charlottesville requests still have priority,
@@ -71,7 +71,7 @@ impl HTTP_Request {
 		if (self.peer_name.ip.to_str().starts_with(VIRGINIA_IP1_PREFIX) ||
 			self.peer_name.ip.to_str().starts_with(VIRGINIA_IP2_PREFIX) ||
 			self.peer_name.ip.to_str().starts_with(LOCALHOST_IP)) 
-		{ 1 } else { 2 }
+		{ 10000000000 - fsize} else { -1 * fsize }
 	}
 }
 
@@ -275,7 +275,6 @@ impl WebServer {
 		// Enqueue the HTTP request.
 		let req = HTTP_Request { peer_name: peer_name.clone(), path: ~path_obj.clone() };
 		let (req_port, req_chan) = Chan::new();
-        //println!("My priority is {:u} and my IP is {:s}", req.get_priority(), req.peer_name.ip.to_str())
 		req_chan.send(req);
 
 		debug!("Waiting for queue mutex lock.");
@@ -308,7 +307,7 @@ impl WebServer {
         // --- 16 task: 1.565s, 1.592s, 1.586s, 1.580s, 1.591s => avg: 1.583
         // --- 32 task: 1.586s, 1.613s, 1.631s, 1.584s, 1.600s => avg: 1.603
         // All tests done immediately after Step 4 (multiple response tasks),
-        // not accurate times at/after Step 5 (SRPT) and beyond.
+        // not accurate times at/after Step 5 (SPTF) and beyond.
         for i in range(0, 4) {
             let (handler_port, handler_chan) = Chan::new();
     		let req_queue_get = self.request_queue_arc.clone();
@@ -335,6 +334,13 @@ impl WebServer {
 				match req_queue.maybe_pop() { // FIFO queue.
 					None => { /* do nothing */ }
 					Some(req) => {
+				        //println!("My file size is {:u} and my IP is {:s}", req.path.stat().size, req.peer_name.ip.to_str())
+				        // ^ Was using that to test that SPTF worked. It did!
+				        /* NOTE FOR US TO TALK ABOUT:
+							It does the first n first no matter the size, where n is the for loop bound above (we set to 4).
+							Then it's pretty good about doing smaller ones first, but it's hard to tell on the zhtta-test-NUL.txt
+							file... It is apparent on zhtta-test2-NUL.txt
+						*/
 						request_chan.send(req);
 						debug!("A new request dequeued, now the length of queue is {:u}.", req_queue.len());
 					}
