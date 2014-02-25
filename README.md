@@ -3,9 +3,14 @@ ps3
 
 Matt Pearson-Beck, Jeff Principe, Arjun Shankar
 
-Code for benchmarking: ```time ./benchmark.sh &>/dev/null```
+NOTES
 
-Run this to fix test files: ```tr "\n" "\0" < zhtta-test.txt > zhtta-test-NUL.txt```
+-- ```make``` now has built-in testing - tests zhtta-test-NUL.txt 10 times, prints out the output of first run and the time taken to run all 10.
+
+-- If you just want to benchmark without recompiling, run ```./benchmark.sh```. Make sure you have recompiled first (just use make honestly).
+
+Run this to fix given test files: ```tr "\n" "\0" < zhtta-test.txt > zhtta-test-NUL.txt```
+
 
 Includes:
 
