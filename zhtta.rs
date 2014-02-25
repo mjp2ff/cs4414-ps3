@@ -219,16 +219,38 @@ impl WebServer {
 		stream.write(response.as_bytes());
 	}
 	
-	// TODO: Streaming file.
+	// DONE: Streaming file.
 	// TODO: Application-layer file caching.
 	fn respond_with_static_file(stream: Option<std::io::net::tcp::TcpStream>, path: &Path) {
-		let mut stream = stream;
 		let mut file_reader = File::open(path).expect("Invalid file!");
-		stream.write(HTTP_OK.as_bytes());
-		stream.write(file_reader.read_to_end());
+		let (write_port, write_chan) = Chan::new();
+		let chunk_size : uint = 1000000;
+		let num_chunks = path.stat().size / (chunk_size as u64);
+
+		spawn(proc() {
+			let mut stream = stream;
+			stream.write(HTTP_OK.as_bytes());
+			for i in range (0, num_chunks) {
+				let chunk : ~[u8] = write_port.recv();
+				stream.write(chunk);
+			}
+			stream.write(write_port.recv());
+		});
+		
+		for i in range (0, num_chunks) {
+			write_chan.send(file_reader.read_bytes(chunk_size));
+		}
+		write_chan.send(file_reader.read_to_end());
+		// This sends last bit if that is < size divider.
+		/*	NOTE: This seems to make it slower? Sending 256 bytes at once took 735 seconds (compared to like 15 normally).
+			Sending 1024 bytes at once took 154 seconds.
+			Sending 1000000 bytes at once took 12 seconds, so faster...? Neat.
+		*/
+
+		//stream.write(file_reader.read_to_end());
 	}
 	
-	// TODO: Server-side gashing.
+	// DONE: Server-side gashing.
 	fn respond_with_dynamic_page(stream: Option<std::io::net::tcp::TcpStream>, path: &Path) {
 		// for now, just serve as static file
 		let mut stream = stream;
@@ -257,7 +279,7 @@ impl WebServer {
 		stream.write(fileStr.as_bytes());
 	}
 	
-	// TODO: Smarter Scheduling.
+	// DONE: Smarter Scheduling.
 	fn enqueue_static_file_request(stream: Option<std::io::net::tcp::TcpStream>, path_obj: &Path, stream_map_arc: MutexArc<HashMap<~str, Option<std::io::net::tcp::TcpStream>>>, req_queue_arc: MutexArc<PriorityQueue<HTTP_Request>>, notify_chan: SharedChan<()>) {
 		// Save stream in hashmap for later response.
 		let mut stream = stream;
@@ -334,7 +356,7 @@ impl WebServer {
 				match req_queue.maybe_pop() { // FIFO queue.
 					None => { /* do nothing */ }
 					Some(req) => {
-				        //println!("My file size is {:u} and my IP is {:s}", req.path.stat().size, req.peer_name.ip.to_str())
+				        // println!("My file size is {:u} and my IP is {:s}", req.path.stat().size, req.peer_name.ip.to_str())
 				        // ^ Was using that to test that SPTF worked. It did!
 				        /* NOTE FOR US TO TALK ABOUT:
 							It does the first n first no matter the size, where n is the for loop bound above (we set to 4).
