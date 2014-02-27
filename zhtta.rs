@@ -1,7 +1,7 @@
 //
 // zhtta.rs
 //
-// Starting code for PS3
+// Finalized code for PS3
 // Running on Rust 0.9
 //
 // Note that this code has serious security risks!	You should not run it 
@@ -10,6 +10,12 @@
 // University of Virginia - cs4414 Spring 2014
 // Weilin Xu and David Evans
 // Version 0.5
+
+// Matt Pearson-Beck, Jeff Principe, Arjun Shankar
+// Note: Extra feature tracks all the IPs that have visited our page, and displays index.shtml
+// differently if a user has been to our site before or if it's their first time seeing the page.
+// We also added a unique visitor count in addition to the regular visitor count.
+
 
 // To see debug! outputs set the RUST_LOG environment variable, e.g.: export RUST_LOG="zhtta=debug"
 
@@ -229,7 +235,7 @@ impl WebServer {
 	fn respond_with_static_file(stream: Option<std::io::net::tcp::TcpStream>, path: &Path) {
 		let mut file_reader = File::open(path).expect("Invalid file!");
 		let (write_port, write_chan) = Chan::new();
-		let chunk_size : uint = 1048576; // 2^20
+		let chunk_size : uint = 131072; // 2^17
 		let num_chunks = path.stat().size / (chunk_size as u64);
 
 		spawn(proc() {
@@ -246,13 +252,6 @@ impl WebServer {
 			write_chan.send(file_reader.read_bytes(chunk_size));
 		}
 		write_chan.send(file_reader.read_to_end());
-		// This sends last bit if that is < size divider.
-		/*	NOTE: This seems to make it slower? Sending 256 bytes at once took 735 seconds (compared to like 15 normally).
-			Sending 1024 bytes at once took 154 seconds.
-			Sending 1000000 bytes at once took 12 seconds, so faster...? Neat.
-		*/
-
-		//stream.write(file_reader.read_to_end());
 	}
 	
 	// DONE: Server-side gashing.
@@ -323,18 +322,7 @@ impl WebServer {
 		let mut handler_comms: ~[Chan<()>] = ~[];
 		let (handler_finished_port, handler_finished_chan) = SharedChan::new();
 
-		// Benchmarking tests
-		// --- Before : 1.851s, 1.820s, 1.862s, 1.989s, 1.857s => avg: 1.876
-		// --- 1 task : 1.832s, 1.868s, 1.861s, 1.864s, 1.852s => avg: 1.855
-		// --- 2 tasks: 1.602s, 1.585s, 1.611s, 1.605s, 1.583s => avg: 1.597
-		// --- 3 tasks: 1.565s, 1.583s, 1.589s, 1.583s, 1.573s => avg: 1.579
-		// --- 4 tasks: 1.578s, 1.582s, 1.596s, 1.582s, 1.591s => avg: 1.586
-		// --- 7 tasks: 1.579s, 1.588s, 1.602s, 1.622s, 1.574s => avg: 1.593
-		// --- 8 tasks: 1.614s, 1.593s, 1.598s, 1.588s, 1.593s => avg: 1.597
-		// --- 16 task: 1.565s, 1.592s, 1.586s, 1.580s, 1.591s => avg: 1.583
-		// --- 32 task: 1.586s, 1.613s, 1.631s, 1.584s, 1.600s => avg: 1.603
-		// All tests done immediately after Step 4 (multiple response tasks),
-		// not accurate times at/after Step 5 (SPTF) and beyond.
+		// Benchmark tested, 4 gave us fastest results.
 		for i in range(0, 4) {
 			let (handler_port, handler_chan) = Chan::new();
 			let req_queue_get = self.request_queue_arc.clone();
