@@ -28,6 +28,7 @@ use std::{os, str, libc, from_str};
 use std::path::Path;
 use std::hashmap::HashMap;
 use extra::priority_queue::PriorityQueue;
+use std::hashmap::HashSet;
 use std::cmp;
 
 use extra::getopts;
@@ -101,6 +102,7 @@ struct WebServer {
 	
 	request_queue_arc: MutexArc<PriorityQueue<HTTP_Request>>,
 	visitor_count_arc: MutexArc<uint>,
+	unique_visitor_count_arc : MutexArc<HashSet<~str>>,
 	// Hashes on string instead of SocketAddr (just cuz for hashing)
 	stream_map_arc: MutexArc<HashMap<~str, Option<std::io::net::tcp::TcpStream>>>,
 	
@@ -120,11 +122,12 @@ impl WebServer {
 			www_dir_path: www_dir_path,
 						
 			request_queue_arc: MutexArc::new(PriorityQueue::new()),
+			unique_visitor_count_arc: MutexArc::new(HashSet::new()),
 			visitor_count_arc: MutexArc::new(0),
 			stream_map_arc: MutexArc::new(HashMap::new()),
 			
 			notify_port: notify_port,
-			shared_notify_chan: shared_notify_chan,		   
+			shared_notify_chan: shared_notify_chan,
 		}
 	}
 	
@@ -139,6 +142,7 @@ impl WebServer {
 		
 		let request_queue_arc = self.request_queue_arc.clone();
 		let visitor_count_arc = self.visitor_count_arc.clone();
+		let unique_visitor_count_arc = self.unique_visitor_count_arc.clone();
 		let shared_notify_chan = self.shared_notify_chan.clone();
 		let stream_map_arc = self.stream_map_arc.clone();
 				
@@ -151,6 +155,9 @@ impl WebServer {
 				let (queue_port, queue_chan) = Chan::new();
 				queue_chan.send(request_queue_arc.clone());
 
+				let (set_port, set_chan) = Chan::new();
+				set_chan.send(unique_visitor_count_arc.clone());
+
 				let (visit_count_port, visit_count_chan) = Chan::new();
 				visit_count_chan.send(visitor_count_arc.clone());
 				
@@ -162,11 +169,13 @@ impl WebServer {
 					let request_queue_arc = queue_port.recv();
 					
 					let visitor_count_arc = visit_count_port.recv();
+					let unique_visitor_count_arc = set_port.recv();
 					visitor_count_arc.access( |count| { *count +=  1; });
 				  
 					let mut stream = stream;
 					
 					let peer_name = WebServer::get_peer_name(&mut stream);
+					let newUser : bool = unique_visitor_count_arc.access( |hashset| { return hashset.insert(peer_name.ip.to_str()); });
 					
 					let mut buf = [0, ..500];
 					stream.read(buf);
@@ -190,7 +199,8 @@ impl WebServer {
 							 
 						if path_str == ~"./" {
 							debug!("===== Counter Page request =====");
-							WebServer::respond_with_counter_page(stream, visitor_count_arc.access( |count| { return *count; } ) );
+							WebServer::respond_with_counter_page(stream, visitor_count_arc.access( |count| { return *count; } ),
+								unique_visitor_count_arc.access( |hashset| { return hashset.len(); }), newUser);
 							debug!("=====Terminated connection from [{:s}].=====", peer_name.to_str());
 						} else if !path_obj.exists() || path_obj.is_dir() {
 							debug!("===== Error page request =====");
@@ -219,13 +229,14 @@ impl WebServer {
 	}
 
 	// DONE: Safe visitor counter.
-	fn respond_with_counter_page(stream: Option<std::io::net::tcp::TcpStream>, visit_count : uint) {
+	fn respond_with_counter_page(stream: Option<std::io::net::tcp::TcpStream>, visit_count : uint, unique_count : uint, newUser : bool) {
 		let mut stream = stream;
 		let response: ~str = 
-			format!("{:s}{:s}<h1>Greetings, Krusty!</h1>
-					 <h2>Visitor count: {:u}</h2></body></html>\r\n", 
-					HTTP_OK, COUNTER_STYLE, 
-					visit_count );
+			format!("{:s}{:s}<h1>{:s}, Krusty!</h1>
+					 <h2>Visitor count: {:u}<br>Unique Visitor Count: {:u}</h2></body></html>\r\n",
+					HTTP_OK, COUNTER_STYLE, if newUser { "Greetings" } else { "Welcome back" },
+					visit_count,
+					unique_count );
 		debug!("Responding to counter request");
 		stream.write(response.as_bytes());
 	}
