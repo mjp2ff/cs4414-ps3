@@ -55,6 +55,7 @@ static LOCALHOST_IP : &'static str = "127.0.0.1";
 static CACHE_SIZE : uint = 10;	// Hold 10 things in cache
 static CACHE_MAX_FILESIZE : u64 = 1000000;	// 1 MB
 static NUM_RESPONSE_TASKS : int = 4;	// 4 tasks to respond to files
+static CHUNK_SIZE : uint = 131072;	// Size of chunks to read in streaming.
 
 static COUNTER_STYLE : &'static str = "<doctype !html><html><head><title>Hello, Rust!</title>
 			 <style>body { background-color: #884414; color: #FFEEAA}
@@ -65,7 +66,6 @@ static COUNTER_STYLE : &'static str = "<doctype !html><html><head><title>Hello, 
 
 struct HTTP_Request {
 	// Use peer_name as the key to access TcpStream in hashmap. 
-
 	// (Due to a bug in extra::arc in Rust 0.9, it is very inconvenient to use TcpStream without the "Freeze" bound.
 	//	See issue: https://github.com/mozilla/rust/issues/12139)
 	peer_name: ~SocketAddr,
@@ -75,9 +75,10 @@ struct HTTP_Request {
 impl HTTP_Request {
 	/* Calculates priority for a request. Implements SPTF and location prioritization
 		by settings the priority of a request equal to its file size, and adding 
-		10,000,000,000 to the priority of any non-Charlottesville request.
-		This guarantees that any Charlottesville requests still have priority,
-		unless someone tries to get a file > 10GB from the server...
+		20,000,000,000 to the priority of any non-Charlottesville request.
+		We use an exponential function so that no matter what the file size,
+		the value will always be between 0 and 20,000,000,000 so this guarantees 
+		that any Charlottesville requests always have priority over others.
 	*/
 	fn get_priority(&self) -> u64 {
 		let fsize = self.path.stat().size;
@@ -110,7 +111,7 @@ struct WebServer {
 	request_queue_arc: MutexArc<PriorityQueue<HTTP_Request>>,
 	visitor_count_arc: MutexArc<uint>,
 	unique_visitor_count_arc : MutexArc<HashSet<~str>>,
-	// Hashes on string instead of SocketAddr (just cuz for hashing)
+	// Hashes on string instead of SocketAddr, better for our hashing
 	stream_map_arc: MutexArc<HashMap<~str, Option<std::io::net::tcp::TcpStream>>>,
 	
 	notify_port: Port<()>,
@@ -267,19 +268,13 @@ impl WebServer {
 		let cacheEntry = cache_port.recv();
 		stream.write(HTTP_OK.as_bytes());
 		match cacheEntry {
-			Some(contents) => {
-				// println("File " + path.as_str().unwrap() + " found in cache!");
-				stream.write(contents);
-			}
-			None => {
-				// println("File " + path.as_str().unwrap() + " not cached");
+			Some(contents) => { stream.write(contents); }	// Found in cache!
+			None => {										// Not in cache! Cache it!
 				let mut file_reader = File::open(path).expect("Invalid file!");
 				let (write_port, write_chan) = Chan::new();
-				let chunk_size : uint = 131072; // 2^17
-				let num_chunks = path.stat().size / (chunk_size as u64);
+				let num_chunks = path.stat().size / (CHUNK_SIZE as u64);
 
 				let (stream_port, stream_chan) = Chan::new();
-				// let mut stream = stream;
 				stream_chan.send(stream);
 
 				spawn(proc() {
@@ -293,17 +288,15 @@ impl WebServer {
 				
 				let mut data : ~[u8] = ~[];
 				for _ in range (0, num_chunks) {
-					let thisOne : ~[u8] = file_reader.read_bytes(chunk_size);
-					// data.push_str(thisOne);
-					if (path.stat().size < CACHE_MAX_FILESIZE) { data.push_all(thisOne); }
+					let thisOne : ~[u8] = file_reader.read_bytes(CHUNK_SIZE);
+					if (path.stat().size < CACHE_MAX_FILESIZE) { data.push_all(thisOne); }	// Only cache if small enough.
 					write_chan.send(thisOne);
 				}
 				let lastOne : ~[u8] = file_reader.read_to_end();
-				// data.push_str(str::from_utf8(lastOne));
-				if (path.stat().size < CACHE_MAX_FILESIZE) { data.push_all(lastOne); }
+				if (path.stat().size < CACHE_MAX_FILESIZE) { data.push_all(lastOne); }		// Only cache if small enough.
 				write_chan.send(lastOne);
 
-				if (path.stat().size < CACHE_MAX_FILESIZE) {
+				if (path.stat().size < CACHE_MAX_FILESIZE) {		// Only cache if small enough.
 					let (cache_data_port, cache_data_chan) = Chan::new();
 					cache_data_chan.send(data);
 					cache_arc.access(|cache| {
@@ -317,7 +310,6 @@ impl WebServer {
 	
 	// DONE: Server-side gashing.
 	fn respond_with_dynamic_page(stream: Option<std::io::net::tcp::TcpStream>, path: &Path) {
-		// for now, just serve as static file
 		let mut stream = stream;
 		let mut file = File::open(path).expect("Invalid file!");	// Open file.
 		let fileBuf = file.read_to_end();							// Read to buffer.
@@ -373,11 +365,10 @@ impl WebServer {
 		});
 		
 		notify_chan.send(()); // Send incoming notification to responder task.
-	
-	
 	}
 
 	// DONE: Smarter Scheduling.
+	// DONE: Spawning more tasks to respond the dequeued requests concurrently. You may need a semophore to control the concurrency.
 	fn dequeue_static_file_request(&mut self) {
 		// Port<> cannot be sent to another task. So we have to make this task as the main task that can access self.notify_port.
 		let mut handler_comms: ~[Chan<()>] = ~[];
@@ -403,20 +394,14 @@ impl WebServer {
 	fn static_file_request_handler(i: int, req_queue_get: MutexArc<PriorityQueue<HTTP_Request>>, stream_map_get: MutexArc<HashMap<~str, Option<std::io::net::tcp::TcpStream>>>, handler_port: Port<()>, handler_finished_chan: SharedChan<int>, cache_arc: MutexArc<LruCache<Path, ~[u8]>>) {
 		let (request_port, request_chan) = Chan::new();
 		loop {
-			handler_finished_chan.send(i);
-			//println!("Port {:d} is ready!", i);
+			handler_finished_chan.send(i); // Port i is ready!
 			handler_port.recv();
 			req_queue_get.access( |req_queue| {
 				match req_queue.maybe_pop() { // FIFO queue.
 					None => { /* do nothing */ }
 					Some(req) => {
 						// println!("My file size is {:u}, my IP is {:s}, my priority is {:u}", req.path.stat().size, req.peer_name.ip.to_str(), req.get_priority())
-						// ^ Use this to test lots of stuff (including SPTF).
-						/* NOTE FOR US TO TALK ABOUT:
-							It does the first n first no matter the size, where n is the for loop bound above (we set to 4).
-							Then it's pretty good about doing smaller ones first, but it's hard to tell on the zhtta-test-NUL.txt
-							file... It is apparent on zhtta-test2-NUL.txt
-						*/
+						// ^ Used this to test lots of stuff (including SPTF).
 						request_chan.send(req);
 						debug!("A new request dequeued, now the length of queue is {:u}.", req_queue.len());
 					}
@@ -435,8 +420,6 @@ impl WebServer {
 				});
 			}
 			
-			// DONE: Spawning more tasks to respond the dequeued requests concurrently. You may need a semophore to control the concurrency.
-			// ^ We did the above in dequeue_static_file_request instead of static_file_request_handler, still should behave the same though.
 			let stream = stream_port.recv();
 			let cache_arc = cache_arc.clone();
 			WebServer::respond_with_static_file(stream, request.path, cache_arc);
