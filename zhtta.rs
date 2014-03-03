@@ -54,6 +54,7 @@ static LOCALHOST_IP : &'static str = "127.0.0.1";
 
 static CACHE_SIZE : uint = 10;	// Hold 10 things in cache
 static CACHE_MAX_FILESIZE : u64 = 1000000;	// 1 MB
+static NUM_RESPONSE_TASKS : int = 4;	// 4 tasks to respond to files
 
 static COUNTER_STYLE : &'static str = "<doctype !html><html><head><title>Hello, Rust!</title>
 			 <style>body { background-color: #884414; color: #FFEEAA}
@@ -382,8 +383,7 @@ impl WebServer {
 		let mut handler_comms: ~[Chan<()>] = ~[];
 		let (handler_finished_port, handler_finished_chan) = SharedChan::new();
 
-		// Benchmark tested, 4 gave us fastest results.
-		for i in range(0, 4) {
+		for i in range(0, NUM_RESPONSE_TASKS) {
 			let (handler_port, handler_chan) = Chan::new();
 			let req_queue_get = self.request_queue_arc.clone();
 			let stream_map_get = self.stream_map_arc.clone();
