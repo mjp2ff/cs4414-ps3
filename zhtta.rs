@@ -97,7 +97,7 @@ impl cmp::Ord for HTTP_Request {
 
 struct CacheItem {
 	name : ~Path,
-	data : ~str,
+	data : ~[u8],
 }
 
 struct CacheList {
@@ -107,7 +107,7 @@ struct CacheList {
 }
 
 impl CacheList {
-	fn access(&mut self, fpath : ~Path) -> ~str {
+	fn access(&mut self, fpath : ~Path) -> ~[u8] {
 		let mut found : bool = false;
 		let mut index : uint = -1;
 		for i in range(0, self.list.len()) {
@@ -125,9 +125,8 @@ impl CacheList {
 			// let mut f : ;
 			match File::open(fpath) {
 				Some(mut f) => {
-					let contents : &[u8] = f.read_to_end();
-					let contentsStr : ~str = str::from_utf8(contents).to_owned();
-					let toPush = CacheItem { name: fpath.clone(), data: contentsStr.clone() };
+					let contents : ~[u8] = f.read_to_end();
+					let toPush = CacheItem { name: fpath.clone(), data: contents.clone() };
 					self.list.push(toPush);
 					self.size += fpath.stat().size;
 
@@ -137,9 +136,9 @@ impl CacheList {
 						self.size -= x.name.stat().size;
 					}
 
-					return contentsStr;
+					return contents;
 				}
-				None => { return ~""; }
+				None => { return ~[]; }
 			};
 		}
 	}
@@ -172,7 +171,7 @@ impl WebServer {
 			port: port,
 			www_dir_path: www_dir_path,
 						
-			cache_arc : MutexArc::new(CacheList { list : ~[], size : 0, maxSize : 10000000 }),	// TODO: Get size of L3 cache, use a fraction of that.
+			cache_arc : MutexArc::new(CacheList { list : ~[], size : 0, maxSize : 1000000 }),	// TODO: Get size of L3 cache, use a fraction of that.
 			request_queue_arc: MutexArc::new(PriorityQueue::new()),
 			unique_visitor_count_arc: MutexArc::new(HashSet::new()),
 			visitor_count_arc: MutexArc::new(0),
@@ -301,12 +300,12 @@ impl WebServer {
 		// let chunk_size : uint = 131072; // 2^17
 		// let num_chunks = path.stat().size / (chunk_size as u64);
 
-		let data : ~str = cache_arc.access( |cacheList| { 
+		let data : ~[u8] = cache_arc.access( |cacheList| { 
 			return cacheList.access(path.clone());
 		});
 
 		let mut stream = stream;
-		stream.write(data.as_bytes());
+		stream.write(data);
 
 		// spawn(proc() {
 		// 	let mut stream = stream;
