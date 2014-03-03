@@ -248,51 +248,65 @@ impl WebServer {
 	// DONE: Streaming file.
 	// TODO: Application-layer file caching.
 	fn respond_with_static_file(stream: Option<std::io::net::tcp::TcpStream>, path: &Path, cache_arc: MutexArc<LruCache<Path, ~str>>) {
-		let mut stream = stream;
-		stream.write(HTTP_OK.as_bytes());
-
-		let (stream_port, stream_chan) = Chan::new();
-		stream_chan.send(stream);
-
+		let (cache_port, cache_chan) = Chan::new();
 		cache_arc.access(|cache| {
-			let mut stream = stream_port.recv();
 			match cache.get(path) {
 				Some(contents) => {
-					stream.write(contents.as_bytes());
+					cache_chan.send(Some(contents.clone()));
 				}
 				None => {
-					let mut file_reader = File::open(path).expect("Invalid file!");
-					let (write_port, write_chan) = Chan::new();
-					let chunk_size : uint = 131072; // 2^17
-					let num_chunks = path.stat().size / (chunk_size as u64);
-
-					let (stream_port_2, stream_chan_2) = Chan::new();
-					let mut stream = stream;
-					stream_chan_2.send(stream);
-
-					spawn(proc() {
-						let mut stream = stream_port_2.recv();
-						for _ in range (0, num_chunks) {
-							let chunk : ~[u8] = write_port.recv();
-							stream.write(chunk);
-						}
-						stream.write(write_port.recv());
-					});
-					
-					let mut data : ~str = ~"";
-					for _ in range (0, num_chunks) {
-						let thisOne = file_reader.read_bytes(chunk_size);
-						data.push_str(str::from_utf8(thisOne));
-						write_chan.send(thisOne);
-					}
-					let lastOne = file_reader.read_to_end();
-					data.push_str(str::from_utf8(lastOne));
-					write_chan.send(lastOne);
-
-					cache.put(path.clone(), data);
+					cache_chan.send(None);
 				}
 			}
 		});
+
+		let mut stream = stream;
+
+		let cacheEntry = cache_port.recv();
+		stream.write(HTTP_OK.as_bytes());
+		match cacheEntry {
+			Some(contents) => {
+				println("Cached file found");
+				stream.write(contents.as_bytes());
+			}
+			None => {
+				println("File not cached");
+				let mut file_reader = File::open(path).expect("Invalid file!");
+				let (write_port, write_chan) = Chan::new();
+				let chunk_size : uint = 131072; // 2^17
+				let num_chunks = path.stat().size / (chunk_size as u64);
+
+				let (stream_port_2, stream_chan_2) = Chan::new();
+				let mut stream = stream;
+				stream_chan_2.send(stream);
+
+				spawn(proc() {
+					let mut stream = stream_port_2.recv();
+					for _ in range (0, num_chunks) {
+						let chunk : ~[u8] = write_port.recv();
+						stream.write(chunk);
+					}
+					stream.write(write_port.recv());
+				});
+				
+				let mut data : ~str = ~"";
+				for _ in range (0, num_chunks) {
+					let thisOne = file_reader.read_bytes(chunk_size);
+					data.push_str(str::from_utf8(thisOne));
+					write_chan.send(thisOne);
+				}
+				let lastOne = file_reader.read_to_end();
+				data.push_str(str::from_utf8(lastOne));
+				write_chan.send(lastOne);
+
+				let (cache_data_port, cache_data_chan) = Chan::new();
+				cache_data_chan.send(data);
+				cache_arc.access(|cache| {
+					let data = cache_data_port.recv();
+					cache.put(path.clone(), data);
+				});
+			}
+		}
 	}
 	
 	// DONE: Server-side gashing.
