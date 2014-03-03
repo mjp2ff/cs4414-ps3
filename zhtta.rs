@@ -52,6 +52,9 @@ static VIRGINIA_IP1_PREFIX : &'static str = "128.143.";
 static VIRGINIA_IP2_PREFIX : &'static str = "137.54.";
 static LOCALHOST_IP : &'static str = "127.0.0.1";
 
+static CACHE_SIZE : uint = 10;	// Hold 10 things in cache
+static CACHE_MAX_FILESIZE : u64 = 1000000;	// 1 MB
+
 static COUNTER_STYLE : &'static str = "<doctype !html><html><head><title>Hello, Rust!</title>
 			 <style>body { background-color: #884414; color: #FFEEAA}
 					h1 { font-size:2cm; text-align: center; color: black; text-shadow: 0 0 4mm red }
@@ -102,7 +105,7 @@ struct WebServer {
 	port: uint,
 	www_dir_path: ~Path,
 	
-	cache_arc: MutexArc<LruCache<Path, ~str>>,
+	cache_arc: MutexArc<LruCache<Path, ~[u8]>>,
 	request_queue_arc: MutexArc<PriorityQueue<HTTP_Request>>,
 	visitor_count_arc: MutexArc<uint>,
 	unique_visitor_count_arc : MutexArc<HashSet<~str>>,
@@ -124,7 +127,7 @@ impl WebServer {
 			port: port,
 			www_dir_path: www_dir_path,
 						
-			cache_arc: MutexArc::new(LruCache::new(5)),
+			cache_arc: MutexArc::new(LruCache::new(CACHE_SIZE)),
 			request_queue_arc: MutexArc::new(PriorityQueue::new()),
 			unique_visitor_count_arc: MutexArc::new(HashSet::new()),
 			visitor_count_arc: MutexArc::new(0),
@@ -246,8 +249,8 @@ impl WebServer {
 	}
 	
 	// DONE: Streaming file.
-	// TODO: Application-layer file caching.
-	fn respond_with_static_file(stream: Option<std::io::net::tcp::TcpStream>, path: &Path, cache_arc: MutexArc<LruCache<Path, ~str>>) {
+	// DONE: Application-layer file caching.
+	fn respond_with_static_file(stream: Option<std::io::net::tcp::TcpStream>, path: &Path, cache_arc: MutexArc<LruCache<Path, ~[u8]>>) {
 		let (cache_port, cache_chan) = Chan::new();
 		cache_arc.access(|cache| {
 			match cache.get(path) {
@@ -259,29 +262,27 @@ impl WebServer {
 				}
 			}
 		});
-
 		let mut stream = stream;
-
 		let cacheEntry = cache_port.recv();
 		stream.write(HTTP_OK.as_bytes());
 		match cacheEntry {
 			Some(contents) => {
-				println("Cached file found");
-				stream.write(contents.as_bytes());
+				// println("File " + path.as_str().unwrap() + " found in cache!");
+				stream.write(contents);
 			}
 			None => {
-				println("File not cached");
+				// println("File " + path.as_str().unwrap() + " not cached");
 				let mut file_reader = File::open(path).expect("Invalid file!");
 				let (write_port, write_chan) = Chan::new();
 				let chunk_size : uint = 131072; // 2^17
 				let num_chunks = path.stat().size / (chunk_size as u64);
 
-				let (stream_port_2, stream_chan_2) = Chan::new();
-				let mut stream = stream;
-				stream_chan_2.send(stream);
+				let (stream_port, stream_chan) = Chan::new();
+				// let mut stream = stream;
+				stream_chan.send(stream);
 
 				spawn(proc() {
-					let mut stream = stream_port_2.recv();
+					let mut stream = stream_port.recv();
 					for _ in range (0, num_chunks) {
 						let chunk : ~[u8] = write_port.recv();
 						stream.write(chunk);
@@ -289,22 +290,26 @@ impl WebServer {
 					stream.write(write_port.recv());
 				});
 				
-				let mut data : ~str = ~"";
+				let mut data : ~[u8] = ~[];
 				for _ in range (0, num_chunks) {
-					let thisOne = file_reader.read_bytes(chunk_size);
-					data.push_str(str::from_utf8(thisOne));
+					let thisOne : ~[u8] = file_reader.read_bytes(chunk_size);
+					// data.push_str(thisOne);
+					if (path.stat().size < CACHE_MAX_FILESIZE) { data.push_all(thisOne); }
 					write_chan.send(thisOne);
 				}
-				let lastOne = file_reader.read_to_end();
-				data.push_str(str::from_utf8(lastOne));
+				let lastOne : ~[u8] = file_reader.read_to_end();
+				// data.push_str(str::from_utf8(lastOne));
+				if (path.stat().size < CACHE_MAX_FILESIZE) { data.push_all(lastOne); }
 				write_chan.send(lastOne);
 
-				let (cache_data_port, cache_data_chan) = Chan::new();
-				cache_data_chan.send(data);
-				cache_arc.access(|cache| {
-					let data = cache_data_port.recv();
-					cache.put(path.clone(), data);
-				});
+				if (path.stat().size < CACHE_MAX_FILESIZE) {
+					let (cache_data_port, cache_data_chan) = Chan::new();
+					cache_data_chan.send(data);
+					cache_arc.access(|cache| {
+						let data = cache_data_port.recv();
+						cache.put(path.clone(), data);
+					});
+				}
 			}
 		}
 	}
@@ -395,7 +400,7 @@ impl WebServer {
 		}
 	}
 
-	fn static_file_request_handler(i: int, req_queue_get: MutexArc<PriorityQueue<HTTP_Request>>, stream_map_get: MutexArc<HashMap<~str, Option<std::io::net::tcp::TcpStream>>>, handler_port: Port<()>, handler_finished_chan: SharedChan<int>, cache_arc: MutexArc<LruCache<Path, ~str>>) {
+	fn static_file_request_handler(i: int, req_queue_get: MutexArc<PriorityQueue<HTTP_Request>>, stream_map_get: MutexArc<HashMap<~str, Option<std::io::net::tcp::TcpStream>>>, handler_port: Port<()>, handler_finished_chan: SharedChan<int>, cache_arc: MutexArc<LruCache<Path, ~[u8]>>) {
 		let (request_port, request_chan) = Chan::new();
 		loop {
 			handler_finished_chan.send(i);
