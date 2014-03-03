@@ -95,10 +95,61 @@ impl cmp::Ord for HTTP_Request {
 	}
 }
 
+struct CacheItem {
+	name : ~Path,
+	data : ~str,
+}
+
+struct CacheList {
+	list : ~[CacheItem],
+	size : u64,
+	maxSize : u64,
+}
+
+impl CacheList {
+	fn access(&mut self, fpath : ~Path) -> ~str {
+		let mut found : bool = false;
+		let mut index : uint = -1;
+		for i in range(0, self.list.len()) {
+			if (self.list[i].name.dirname() == fpath.dirname() && self.list[i].name.filename().unwrap() == fpath.filename().unwrap()) {
+				found = true;
+				index = i;
+			}
+		}
+		if (found) {	// Getting from already in cache.
+			let x : CacheItem = self.list.remove(index);
+			self.list.push(x);
+			return self.list[index].data.clone();
+		}
+		else {	// Adding it to cache
+			// let mut f : ;
+			match File::open(fpath) {
+				Some(mut f) => {
+					let contents : &[u8] = f.read_to_end();
+					let contentsStr : ~str = str::from_utf8(contents).to_owned();
+					let toPush = CacheItem { name: fpath.clone(), data: contentsStr.clone() };
+					self.list.push(toPush);
+					self.size += fpath.stat().size;
+
+					// Check if size is over.
+					while (self.size > self.maxSize) {
+						let x : CacheItem = self.list.shift();
+						self.size -= x.name.stat().size;
+					}
+
+					return contentsStr;
+				}
+				None => { return ~""; }
+			};
+		}
+	}
+}
+
 struct WebServer {
 	ip: ~str,
 	port: uint,
 	www_dir_path: ~Path,
+	cache_arc : MutexArc<CacheList>,
 	
 	request_queue_arc: MutexArc<PriorityQueue<HTTP_Request>>,
 	visitor_count_arc: MutexArc<uint>,
@@ -121,6 +172,7 @@ impl WebServer {
 			port: port,
 			www_dir_path: www_dir_path,
 						
+			cache_arc : MutexArc::new(CacheList { list : ~[], size : 0, maxSize : 10000000 }),	// TODO: Get size of L3 cache, use a fraction of that.
 			request_queue_arc: MutexArc::new(PriorityQueue::new()),
 			unique_visitor_count_arc: MutexArc::new(HashSet::new()),
 			visitor_count_arc: MutexArc::new(0),
@@ -243,26 +295,36 @@ impl WebServer {
 	
 	// DONE: Streaming file.
 	// TODO: Application-layer file caching.
-	fn respond_with_static_file(stream: Option<std::io::net::tcp::TcpStream>, path: &Path) {
-		let mut file_reader = File::open(path).expect("Invalid file!");
-		let (write_port, write_chan) = Chan::new();
-		let chunk_size : uint = 131072; // 2^17
-		let num_chunks = path.stat().size / (chunk_size as u64);
+	fn respond_with_static_file(stream: Option<std::io::net::tcp::TcpStream>, path: ~Path, cache_arc : MutexArc<CacheList>) {
+		// let mut file_reader = File::open(path).expect("Invalid file!");
+		// let (write_port, write_chan) = Chan::new();
+		// let chunk_size : uint = 131072; // 2^17
+		// let num_chunks = path.stat().size / (chunk_size as u64);
 
-		spawn(proc() {
-			let mut stream = stream;
-			stream.write(HTTP_OK.as_bytes());
-			for _ in range (0, num_chunks) {
-				let chunk : ~[u8] = write_port.recv();
-				stream.write(chunk);
-			}
-			stream.write(write_port.recv());
+		let data : ~str = cache_arc.access( |cacheList| { 
+			return cacheList.access(path.clone());
 		});
+
+		let mut stream = stream;
+		stream.write(data.as_bytes());
+
+		// spawn(proc() {
+		// 	let mut stream = stream;
+		// 	stream.write(HTTP_OK.as_bytes());
+		// 	for _ in range (0, num_chunks) {
+		// 		// Add chunk to savedBytes
+		// 		let chunk : ~[u8] = write_port.recv();
+		// 		stream.write(chunk);
+		// 	}
+		// 	stream.write(write_port.recv());
+		// 	// Add chunk to savedBytes.
+		// 	// Add savedBytes to cache.
+		// });
 		
-		for _ in range (0, num_chunks) {
-			write_chan.send(file_reader.read_bytes(chunk_size));
-		}
-		write_chan.send(file_reader.read_to_end());
+		// for _ in range (0, num_chunks) {
+		// 	write_chan.send(file_reader.read_bytes(chunk_size));
+		// }
+		// write_chan.send(file_reader.read_to_end());
 	}
 	
 	// DONE: Server-side gashing.
@@ -339,8 +401,9 @@ impl WebServer {
 			let req_queue_get = self.request_queue_arc.clone();
 			let stream_map_get = self.stream_map_arc.clone();
 			let handler_finished_chan_clone = handler_finished_chan.clone();
+			let cache_arc_clone = self.cache_arc.clone();
 			handler_comms.push(handler_chan);
-			spawn(proc() { WebServer::static_file_request_handler(i, req_queue_get, stream_map_get, handler_port, handler_finished_chan_clone); });
+			spawn(proc() { WebServer::static_file_request_handler(i, req_queue_get, stream_map_get, handler_port, handler_finished_chan_clone, cache_arc_clone); });
 		}
 
 		loop {
@@ -350,7 +413,7 @@ impl WebServer {
 		}
 	}
 
-	fn static_file_request_handler(i: int, req_queue_get: MutexArc<PriorityQueue<HTTP_Request>>, stream_map_get: MutexArc<HashMap<~str, Option<std::io::net::tcp::TcpStream>>>, handler_port: Port<()>, handler_finished_chan: SharedChan<int>) {
+	fn static_file_request_handler(i: int, req_queue_get: MutexArc<PriorityQueue<HTTP_Request>>, stream_map_get: MutexArc<HashMap<~str, Option<std::io::net::tcp::TcpStream>>>, handler_port: Port<()>, handler_finished_chan: SharedChan<int>, cache_arc : MutexArc<CacheList>) {
 		let (request_port, request_chan) = Chan::new();
 		loop {
 			handler_finished_chan.send(i);
@@ -388,7 +451,7 @@ impl WebServer {
 			// DONE: Spawning more tasks to respond the dequeued requests concurrently. You may need a semophore to control the concurrency.
 			// ^ We did the above in dequeue_static_file_request instead of static_file_request_handler, still should behave the same though.
 			let stream = stream_port.recv();
-			WebServer::respond_with_static_file(stream, request.path);
+			WebServer::respond_with_static_file(stream, request.path.clone(), cache_arc.clone());
 			// Close stream automatically.
 			debug!("=====Terminated connection from [{:s}].=====", request.peer_name.to_str());
 		}
